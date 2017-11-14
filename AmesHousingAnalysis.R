@@ -16,6 +16,8 @@ library(DAAG)
 library(forecast)
 library(lubridate)
 library(leaflet)
+library(tree)
+
 
 Ames_train= read.csv('C:\\Data\\Bootcamp\\RML\\Machine Learning Project\\Data\\train\\train.csv',
                      header = TRUE, stringsAsFactor = FALSE)
@@ -72,6 +74,7 @@ imputed_data = mice(Ames_train, m=5, maxit=10, method = 'cart')
 
 #get the data imputed
 Ames_train <- complete(imputed_data,2)
+temp2 = write.csv(Ames_train,'Ames_train_imp1.csv')
 #impute data using missForest
 #imputed_rf = missForest(ames_sub)
 
@@ -86,13 +89,13 @@ plot(Ames_train$MasVnrArea, Ames_train$SalePrice)
 
 ##Anova test
 summary(aov(SalePrice ~ . , data = Ames_train))
-
 # Street is not significant and can be dropped
 
 # Garage variables
 summary(aov(SalePrice ~ GarageType*GarageFinish*GarageQual*GarageCond, data = Ames_train, na.rm = TRUE ))
 #GarageType , GarageFinish and Garage Condition are more significant in predicting sale Price
 #interaction between GarageType and Garage Finish has a significant p - value.
+
 
 #Basement variables
 
@@ -119,7 +122,22 @@ Ames_train_categorical = lapply(Ames_train_categorical,factor)
 
 
 #plot relationship between categorical variables
-mosaic(Ames_train_categorical, shade = TRUE)
+#mosaic(Ames_train_categorical, shade = TRUE)
+
+# EDA
+
+# SalePrice on Type of Garage
+ggplot(Ames_train, aes(GarageFinish, SalePrice)) + geom_bar(stat= 'identity')
+
+#SalePrice on Number of rooms
+ggplot(Ames_train, aes(TotRmsAbvGrd, SalePrice)) + geom_col()
+
+#SalePrice on Garage Finish
+ggplot(Ames_train,aes(GarageFinish, SalePrice) ) + geom_col()
+
+temp =Ames_train %>% group_by(GarageFinish) %>% summarise(count = n())
+ggplot(temp,aes(GarageFinish, sp ) )+ geom_col()
+
 
 #plot histogram of saleprice
 ggplot(Ames_train, aes(x=log(SalePrice)))+ geom_histogram(bins = 25 )
@@ -176,7 +194,7 @@ Ames_train_numeric[,names(skew_cols)] = sapply(Ames_train_numeric[,names(skew_co
 
 
 #chi -sq test
-mapply(function(x, y) chisq.test(x, y)$p.value, Ames_train_categorical[,-43] , MoreArgs=list(Ames_train_categorical[,43]))
+#mapply(function(x, y) chisq.test(x, y)$p.value, Ames_train_categorical[,-43] , MoreArgs=list(Ames_train_categorical[,43]))
 
 #combine numerical and categorical variables
 Ames_train1 = cbind( Ames_train_categorical, Ames_train_numeric)
@@ -236,7 +254,7 @@ for (mtry in 1:80) {
   cat("We're performing iteration", mtry, "\n")
 }
 
-#Mean of squared residuals: 0.01517385
+3#Mean of squared residuals: 0.01517385
 # % Var explained: 88.48
 #Number Of trees - 500
 # variables at each split - 80
@@ -266,9 +284,10 @@ mean(best_fit$rsq)
 #rf_Ames_cv = rfcv(trainx = Ames_train1[train, ], trainy = SalePrice.test, cv.fold = 5)
 
 predict_test = predict(best_fit, test)
+pred = as.data.frame(predict_test)
 
 #calculate mean squared error
-plot(predict_test,SalePrice.test)
+plot(SalePrice.test,pred[1])
 abline(0,1)
 
 mse = mean((SalePrice.test - predict_test)^2)
@@ -345,11 +364,11 @@ Ames_lasso_full  = glmnet(Ames_dummy, Ames_train1$SalePrice, alpha =1, lambda= b
 Ames_lasso_full
 
 
-# model  using Multiple linear regression
+# model using Multiple linear regression
 
 ml_Ames = lm(SalePrice ~ Neighborhood + TotalBsmtSF + 
-               GrLivArea + KitchenQual + GarageArea + BsmtFinSF1 +BsmtFinType1 + OverallCond
-             + LotArea + X1stFlrSF
+               GrLivArea + KitchenQual + GarageArea + BsmtFinSF1 + BsmtFinType1 + OverallQual
+             + LotArea + X1stFlrSF 
                , data = Ames_train1[train,], x = TRUE)
 
 summary(ml_Ames)
@@ -360,7 +379,15 @@ AIC(ml_Ames)
 #check for assumptions
 plot(ml_Ames)
 
+bc= boxcox(ml_Ames)
+lambda = bc$x[which(bc$y == max(bc$y))]
+SalePrice.bc = (Ames_train1$SalePrice^lambda - 1)/lambda
 
+ml_ames_bc = lm(SalePrice.bc ~ Neighborhood + TotalBsmtSF + 
+                  GrLivArea + KitchenQual + GarageArea + BsmtFinSF1 + BsmtFinType1 + OverallQual
+                 + X1stFlrSF
+                , data = Ames_train1, x = TRUE)
+summary(ml_ames_bc)
 # find the default contrasts used in the model.
 # default contrasts used in the model is contr.treatment
 ml_Ames$contrasts
@@ -385,6 +412,7 @@ car::vif(ml_Ames)
 #Added variable plots for addition of each variable
 avPlots(ml_Ames)
 
+
 #From the avplots and the p values, x1stflr does not significantly contribute to SalePrice. 
 
 #Reduced model 
@@ -402,7 +430,7 @@ anova(ml_Ames_reduced, ml_Ames)
 # p value is very less, we choose first model over reduced
 
 #5 folds cross validation on linear model
-ml_Ames_cv =CVlm(ml_Ames,data = Ames_train1[train,], m=5, seed = 0, plotit = TRUE)
+ml_Ames_cv =CVlm(ml_Ames,data = Ames_train1, m=5, seed = 0, plotit = TRUE)
 attributes(ml_Ames_cv)
 
 #overall ms - 0.0166 
@@ -411,7 +439,15 @@ confint(ml_Ames)
 
 
 
-predict_ml_validation = predict(ml_Ames, test)
+predict_ml_validation = predict(ml_Ames, test, interval = 'confidence')
+
+plot(x = SalePrice.test, y = predict_ml_validation[,1], xlab = "", ylab ="")
+abline(0,1)
+abline(.95,1, lty = 2)
+abline(-.95,1, lty = 2)
+
+#lines(SalePrice.test, predict_ml_validation[, 2], col = "blue") #Plotting the lower confidence band.
+#lines(SalePrice.test, predict_ml_validation[, 3], col = "blue") #Plotting the upper confidence band.
 
 mse_ml = mean((predict_ml_validation - SalePrice.test)^2) 
 Rmse_ml = sqrt(mean((predict_ml_validation - SalePrice.test)^2)) 
@@ -425,9 +461,27 @@ Rmse_ml = sqrt(mean((predict_ml_validation - SalePrice.test)^2))
 #Rmse - 0.0117
 
 
+# area vs salePrice
+ml_Ames_Area = lm(SalePrice ~ TotalBsmtSF +  GrLivArea + GarageArea , data = Ames_train1[train,])
+summary(ml_Ames_Area)
+# R2 - 0.727
+
+#Quality on SalesPrice
+ml_Ames_quality = lm(SalePrice ~  OverallQual, data = Ames_train1[train,])
+summary(ml_Ames_quality)
+# R2 - 64.2
+
+#Neighborhood on SalePrice
+ml_Ames_neighbor = lm(SalePrice ~  Neighborhood + YearBuilt + YearRemodAdd + LotArea, data = Ames_train1[train,])
+summary(ml_Ames_neighbor)
 
 
+## Decision Tree ###
+tr_Ames = tree( SalePrice ~ . , split = 'deviance', data = Ames_train1[train,])
+summary(tr_Ames)
 
+plot(tr_Ames)
+text(tr_Ames, pretty = 0)
 # Time series
 
 saleperyear = Ames_train1 %>% group_by(YrSold,QtrSold) %>% summarise(NumOfHouseSold= n())
@@ -475,15 +529,6 @@ ggplot(salepermonth,aes(YrSold,MonthlySales )) + geom_col(aes(fill=MoSold),posit
 #ames_sub = Ames_train %>% select(LotFrontage,MasVnrType,MasVnrArea ,Electrical,GarageYrBlt) 
 ###############################################
 
-# EDA
-# SalePrice on Type of Garage
-ggplot(Ames_train, aes(GarageType, SalePrice)) + geom_col()
-
-#SalePrice on Number of rooms
-ggplot(Ames_train, aes(TotRmsAbvGrd, SalePrice)) + geom_col()
-
-#SalePrice on Garage Finish
-ggplot(Ames_train,aes(GarageFinish, SalePrice) ) + geom_col()
 
 
 coordinates <- data.frame(Neighborhood = levels(Ames_train1$Neighborhood),
@@ -524,3 +569,4 @@ Ames <- leaflet(coordinates) %>%
   addMarkers(popup = ~paste(Neighborhood,", Mean:",
                             round(mean.price),sep = ""))
 Ames
+
